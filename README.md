@@ -20,6 +20,7 @@ cargo install --path .   # installs `web` to ~/.cargo/bin
 | `web crawl <url>` | Crawl a site to markdown | crawl4ai (`crwl`) -> Firecrawl v2 |
 | `web crawl <url> --map` | List discovered URLs | Firecrawl v2 (paid) |
 | `web crawl <url> --depth N` | Depth-limited crawl | Firecrawl v2 (paid) |
+| `web browse <cmd> [args]` | Stateful browser control (passthrough) | chrome-devtools daemon |
 
 `--json` on any command for structured output. See `web <cmd> --help`.
 
@@ -40,9 +41,23 @@ crawl4ai-setup             # installs the Chromium browser crawl4ai drives
 Two capabilities stay Firecrawl-only (crawl4ai's CLI cannot do them cheaply):
 `--map` (no content-free URL-discovery mode) and `--depth` (its deep-crawl hardcodes
 max depth = 3). Passing `--depth` on the default backbone prints a note and uses
-Firecrawl. Page interaction (clicking, forms, stateful sessions) is not in this binary;
-see the `web` skill for the `crwl -C` (one-shot) and `chrome-devtools` (stateful,
-via `pnpm dlx chrome-devtools-mcp`) paths.
+Firecrawl. One-shot scripted interaction (login then scrape in a single call) stays
+on `crwl -C`; see the `web` skill.
+
+### browse backbone (stateful browser control)
+
+`web browse` forwards its args verbatim to the `chrome-devtools` CLI shipped inside
+[chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp). That CLI
+manages a persistent daemon (`start` / `status` / `stop`) owning a Chrome instance;
+all other commands (`new_page`, `take_snapshot`, `click`, `fill`, `upload_file`,
+`take_screenshot`, ...) talk to it, so cookies and login state survive across calls.
+`web browse --help` proxies the upstream command list; known telemetry/update banners
+are stripped from all output.
+
+Runner resolution: `browseBin` config override (binary or `.js` entry point run via
+node) -> `chrome-devtools` on `$PATH` -> `pnpm dlx --package <browsePackage>
+chrome-devtools`, with `browsePackage` pinned to `chrome-devtools-mcp@1.6.0` by
+default (older versions lack `upload_file`).
 
 ## Config
 

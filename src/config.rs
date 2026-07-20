@@ -23,6 +23,14 @@ pub struct Config {
     /// back to ~/.local/bin/crwl then $PATH.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crawl4ai_bin: Option<String>,
+    /// Override entry point for the chrome-devtools CLI used by `web browse`
+    /// (a binary, or a .js script run through node). If unset, resolution falls
+    /// back to `chrome-devtools` on $PATH, then `pnpm dlx` of browse_package.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browse_bin: Option<String>,
+    /// npm package spec for the `pnpm dlx` fallback of `web browse`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browse_package: Option<String>,
 
     #[serde(default)]
     pub defaults: Defaults,
@@ -85,6 +93,13 @@ fn default_crawl_backbone() -> String {
 }
 
 impl Config {
+    /// Pinned chrome-devtools-mcp spec for the `pnpm dlx` fallback.
+    pub fn browse_package(&self) -> String {
+        self.browse_package
+            .clone()
+            .unwrap_or_else(|| "chrome-devtools-mcp@1.6.0".to_string())
+    }
+
     /// Path to the config file. Honours $XDG_CONFIG_HOME, else ~/.config
     /// (not the macOS "Application Support" dir, to match the rest of this
     /// user's tooling).

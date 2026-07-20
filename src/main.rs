@@ -62,6 +62,15 @@ enum Commands {
         provider: Option<String>,
     },
 
+    /// Control a persistent, stateful browser session (chrome-devtools daemon).
+    /// Args are passed through verbatim: `web browse start`, `web browse --help`
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
+    Browse {
+        /// chrome-devtools command and its args/flags, forwarded verbatim
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
     /// Crawl a site to markdown (crawl4ai -> Firecrawl).
     /// --map (list URLs) and --depth are Firecrawl-only.
     Crawl {
@@ -97,6 +106,7 @@ fn main() {
         Commands::Answer { query, provider } => {
             commands::answer::run(&query, provider.as_deref(), json)
         }
+        Commands::Browse { args } => commands::browse::run(&args),
         Commands::Crawl {
             url,
             map,
