@@ -1,0 +1,22 @@
+{
+  "name": "pw-browse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DIY persistent-Playwright browser-automation CLI. We own the browser process lifetime.",
+  "type": "module",
+  "bin": {
+    "pw-browse": "dist/cli.js",
+    "rydoo-batch": "dist/rydoo-batch.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

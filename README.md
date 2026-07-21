@@ -20,7 +20,7 @@ cargo install --path .   # installs `web` to ~/.cargo/bin
 | `web crawl <url>` | Crawl a site to markdown | crawl4ai (`crwl`) -> Firecrawl v2 |
 | `web crawl <url> --map` | List discovered URLs | Firecrawl v2 (paid) |
 | `web crawl <url> --depth N` | Depth-limited crawl | Firecrawl v2 (paid) |
-| `web browse <cmd> [args]` | Stateful browser control (passthrough) | chrome-devtools daemon |
+| `web browse <cmd> [args]` | Stateful browser control (passthrough) | pw-browse daemon (bundled) -> chrome-devtools |
 
 `--json` on any command for structured output. See `web <cmd> --help`.
 
@@ -46,18 +46,35 @@ on `crwl -C`; see the `web` skill.
 
 ### browse backbone (stateful browser control)
 
-`web browse` forwards its args verbatim to the `chrome-devtools` CLI shipped inside
-[chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp). That CLI
-manages a persistent daemon (`start` / `status` / `stop`) owning a Chrome instance;
-all other commands (`new_page`, `take_snapshot`, `click`, `fill`, `upload_file`,
-`take_screenshot`, ...) talk to it, so cookies and login state survive across calls.
-`web browse --help` proxies the upstream command list; known telemetry/update banners
-are stripped from all output.
+`web browse` forwards its args verbatim to a persistent browser-control daemon
+(`start` / `status` / `stop`) that owns a single browser instance; all other
+commands (`goto`, `snapshot`, `click`, `fill`, `upload`, ...) talk to it, so cookies
+and login state survive across calls. `web browse --help` proxies the backend command
+list; known telemetry/update banners are stripped from all output.
+
+The bundled default backend is [`pw-browse/`](pw-browse/), a self-contained pnpm/TS
+package vendored in this repo. It runs its own long-lived persistent-Playwright daemon
+that we detach explicitly and never close on client disconnect. It exists because
+`chrome-devtools-mcp` (the previous backend) kept losing its daemon and Chrome minutes
+after spawn on this Mac (suspected environment-level process reaping); `pw-browse`
+sidesteps that by owning the browser process lifetime itself. `pw-browse/` is a
+standalone package, not part of the Rust build. It also ships `rydoo-batch`, a
+deterministic monthly Rydoo runner that shares the Playwright dependency.
+
+Build and link the backend once (`browseBin` in the config then points at the shim):
+
+```bash
+cd pw-browse
+PNPM_HOME="$HOME/Library/pnpm" pnpm install && pnpm build
+pnpm exec playwright install chromium          # once, if not cached
+PNPM_HOME="$HOME/Library/pnpm" pnpm link --global   # installs `pw-browse` + `rydoo-batch` shims
+```
 
 Runner resolution: `browseBin` config override (binary or `.js` entry point run via
-node) -> `chrome-devtools` on `$PATH` -> `pnpm dlx --package <browsePackage>
-chrome-devtools`, with `browsePackage` pinned to `chrome-devtools-mcp@1.6.0` by
-default (older versions lack `upload_file`).
+node; set to the `pw-browse` shim by default) -> `chrome-devtools` on `$PATH` ->
+`pnpm dlx --package <browsePackage> chrome-devtools`, with `browsePackage` pinned to
+`chrome-devtools-mcp@1.6.0` by default. See [`pw-browse/README.md`](pw-browse/README.md)
+for the verb list, ref scheme, and the `rydoo-batch` workflow.
 
 ## Config
 
