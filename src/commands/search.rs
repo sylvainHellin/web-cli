@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::http;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct SearchResult {
     title: String,
     url: String,
@@ -16,39 +16,70 @@ struct SearchResult {
 
 /// Search the web for a ranked list of links.
 ///
-/// Fallback chain: Brave (if keyed) -> Exa (if keyed).
+/// Default provider: Exa. Firecrawl is opt-in only (`--provider firecrawl`):
+/// it bills 2 credits per 10 results, so it stays out of the default path.
 pub fn run(
     query: &str,
     n: Option<usize>,
     site: Option<&str>,
     recency: Option<&str>,
+    provider: Option<&str>,
+    max_snippet: usize,
     json: bool,
 ) -> Result<()> {
     let cfg = Config::load()?;
     let count = n.unwrap_or(cfg.defaults.search_results);
 
-    // 1. Brave
-    if let Some(key) = cfg.brave_api_key.as_deref() {
-        match brave_search(query, count, site, recency, key) {
-            Ok(results) if !results.is_empty() => {
-                return emit(query, "brave", &results, json);
-            }
-            Ok(_) => eprintln!("[web search] Brave returned no results, trying Exa..."),
-            Err(e) => eprintln!("[web search] Brave failed ({e}), trying Exa..."),
+    // Explicit provider: use it and only it, so a comparison run is honest.
+    match provider {
+        Some("firecrawl") => {
+            let key = cfg
+                .firecrawl_api_key
+                .as_deref()
+                .context("Firecrawl not configured. Add firecrawlApiKey to the config.")?;
+            let results = firecrawl_search(query, count, site, recency, key)
+                .context("Firecrawl search failed")?;
+            return emit(query, "firecrawl", &results, max_snippet, json);
         }
+        Some("exa") => {
+            let key = cfg
+                .exa_api_key
+                .as_deref()
+                .context("Exa not configured. Add exaApiKey to the config.")?;
+            let results = exa_search(query, count, site, recency, key)
+                .context("Exa search failed")?;
+            return emit(query, "exa", &results, max_snippet, json);
+        }
+        Some(other) => bail!("Unknown search provider '{other}' (expected exa or firecrawl)"),
+        None => {}
     }
 
-    // 2. Exa
+    // Default: Exa.
     if let Some(key) = cfg.exa_api_key.as_deref() {
         let results = exa_search(query, count, site, recency, key)
             .context("Exa search failed")?;
-        return emit(query, "exa", &results, json);
+        return emit(query, "exa", &results, max_snippet, json);
     }
 
-    bail!("No search provider configured. Add braveApiKey or exaApiKey to the config.");
+    bail!("No search provider configured. Add exaApiKey to the config.");
 }
 
-fn emit(query: &str, provider: &str, results: &[SearchResult], json: bool) -> Result<()> {
+/// Render results, applying the shared snippet cap first so every provider
+/// pays the same context budget. `max_snippet == 0` means uncapped.
+fn emit(
+    query: &str,
+    provider: &str,
+    results: &[SearchResult],
+    max_snippet: usize,
+    json: bool,
+) -> Result<()> {
+    let mut results = results.to_vec();
+    if max_snippet > 0 {
+        for r in &mut results {
+            r.snippet = truncate_chars(&r.snippet, max_snippet);
+        }
+    }
+
     if json {
         let out = json!({
             "query": query,
@@ -73,62 +104,6 @@ fn emit(query: &str, provider: &str, results: &[SearchResult], json: bool) -> Re
     out.push_str("\nOpen any result with: web fetch <url>");
     println!("{out}");
     Ok(())
-}
-
-/// Brave Web Search: GET /res/v1/web/search.
-fn brave_search(
-    query: &str,
-    count: usize,
-    site: Option<&str>,
-    recency: Option<&str>,
-    api_key: &str,
-) -> Result<Vec<SearchResult>> {
-    let client = http::client(30)?;
-    let q = match site {
-        Some(s) => format!("site:{s} {query}"),
-        None => query.to_string(),
-    };
-    let mut params: Vec<(String, String)> = vec![
-        ("q".into(), q),
-        ("count".into(), count.min(20).to_string()),
-    ];
-    if let Some(r) = recency {
-        // Map our friendly names to Brave freshness codes.
-        let fresh = match r {
-            "day" => "pd",
-            "week" => "pw",
-            "month" => "pm",
-            "year" => "py",
-            other => other, // allow raw Brave codes / date ranges
-        };
-        params.push(("freshness".into(), fresh.into()));
-    }
-
-    let resp = client
-        .get("https://api.search.brave.com/res/v1/web/search")
-        .header("Accept", "application/json")
-        .header("X-Subscription-Token", api_key)
-        .query(&params)
-        .send()
-        .context("Brave request failed")?;
-    let status = resp.status();
-    let body: serde_json::Value = resp.json().context("Failed to parse Brave response")?;
-    if !status.is_success() {
-        bail!("Brave returned status {status}: {body}");
-    }
-
-    let mut results = Vec::new();
-    if let Some(arr) = body["web"]["results"].as_array() {
-        for r in arr {
-            results.push(SearchResult {
-                title: r["title"].as_str().unwrap_or("").to_string(),
-                url: r["url"].as_str().unwrap_or("").to_string(),
-                snippet: r["description"].as_str().unwrap_or("").to_string(),
-                age: r["age"].as_str().map(|s| s.to_string()),
-            });
-        }
-    }
-    Ok(results)
 }
 
 /// Exa /search: POST with highlights for snippet text.
@@ -196,6 +171,94 @@ fn exa_search(
         }
     }
     Ok(results)
+}
+
+/// Firecrawl v2 /search: POST with highlights (on by default) for snippet text.
+/// Opt-in provider, billed at 2 credits per 10 results.
+fn firecrawl_search(
+    query: &str,
+    count: usize,
+    site: Option<&str>,
+    recency: Option<&str>,
+    api_key: &str,
+) -> Result<Vec<SearchResult>> {
+    let client = http::client(60)?;
+    // Firecrawl passes the query through to the underlying engine, so the
+    // `site:` operator is the cheapest way to scope it.
+    let q = match site {
+        Some(s) => format!("site:{s} {query}"),
+        None => query.to_string(),
+    };
+    let mut payload = json!({
+        "query": q,
+        "limit": count,
+        "sources": ["web"],
+        // On by default server-side, but pinned here so the snippet source is
+        // explicit: highlights replace `description` with query-relevant
+        // passages lifted from the page (same 2-credits-per-10-results cost).
+        "highlights": true,
+    });
+    if let Some(r) = recency {
+        // Google-style time-based search codes (tbs).
+        let tbs = match r {
+            "day" => "qdr:d",
+            "week" => "qdr:w",
+            "month" => "qdr:m",
+            "year" => "qdr:y",
+            other => other, // allow raw tbs codes
+        };
+        payload["tbs"] = json!(tbs);
+    }
+
+    let resp = client
+        .post("https://api.firecrawl.dev/v2/search")
+        .bearer_auth(api_key)
+        .json(&payload)
+        .send()
+        .context("Firecrawl request failed")?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().context("Failed to parse Firecrawl response")?;
+    if !status.is_success() {
+        bail!("Firecrawl /search returned status {status}: {body}");
+    }
+
+    // Response: { success, data: { web: [ { url, title, description, ... } ] } }
+    let arr = body["data"]["web"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    let mut results = Vec::new();
+    for r in &arr {
+        // With highlights enabled the API may return query-relevant snippets
+        // in place of (or alongside) the plain description.
+        // Firecrawl returns highlights in place of `description` rather than as
+        // a separate field; the array form is handled anyway in case that
+        // changes. Length is handled centrally in `emit`.
+        let snippet = r["highlights"]
+            .as_array()
+            .and_then(|h| h.first())
+            .and_then(|s| s.as_str())
+            .or_else(|| r["description"].as_str())
+            .unwrap_or("");
+        results.push(SearchResult {
+            title: r["title"].as_str().unwrap_or("").to_string(),
+            url: r["url"].as_str().unwrap_or("").to_string(),
+            snippet: snippet.to_string(),
+            age: None,
+        });
+    }
+    Ok(results)
+}
+
+/// Truncate on a char boundary, appending an ellipsis when text was cut.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max).collect();
+    out.push_str("...");
+    out
 }
 
 /// Compute an ISO 8601 (UTC, date-only) string `days` before now, without

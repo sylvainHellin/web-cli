@@ -1,3 +1,11 @@
 /target
+
+# Local agent / editor scratch
+/.pi
 /.nvim
-/.pi/workflow/i-have-recently-discovered-the-crawl4ai--f06e30
+/.claude
+
+# Local scratch and secrets
+*.local
+config.json
+*.log

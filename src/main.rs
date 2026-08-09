@@ -34,7 +34,7 @@ enum Commands {
         raw: bool,
     },
 
-    /// Search the web and return a ranked list of links (Brave -> Exa)
+    /// Search the web and return a ranked list of links (Exa)
     Search {
         /// Search query
         query: String,
@@ -50,6 +50,15 @@ enum Commands {
         /// Recency filter: day, week, month, year
         #[arg(long)]
         recency: Option<String>,
+
+        /// Force one provider: exa or firecrawl (default: exa).
+        /// firecrawl is opt-in only (paid per result).
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Max chars per result snippet (0 = uncapped)
+        #[arg(long, default_value_t = 500)]
+        max_snippet: usize,
     },
 
     /// Ask a question and get a sourced answer with citations (Exa -> Perplexity)
@@ -102,7 +111,17 @@ fn main() {
             n,
             site,
             recency,
-        } => commands::search::run(&query, n, site.as_deref(), recency.as_deref(), json),
+            provider,
+            max_snippet,
+        } => commands::search::run(
+            &query,
+            n,
+            site.as_deref(),
+            recency.as_deref(),
+            provider.as_deref(),
+            max_snippet,
+            json,
+        ),
         Commands::Answer { query, provider } => {
             commands::answer::run(&query, provider.as_deref(), json)
         }

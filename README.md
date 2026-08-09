@@ -15,7 +15,7 @@ cargo install --path .   # installs `web` to ~/.cargo/bin
 | Command | What it does | Providers (primary -> fallback) |
 | ------- | ------------ | ------------------------------- |
 | `web fetch <url>` | URL to clean markdown | crawl4ai (`crwl`) -> Jina Reader -> Exa contents -> raw GET |
-| `web search <query>` | Ranked list of links | Brave -> Exa |
+| `web search <query>` | Ranked list of links | Exa (Firecrawl opt-in) |
 | `web answer <query>` | Sourced answer + citations | Exa `/answer` -> Perplexity Sonar |
 | `web crawl <url>` | Crawl a site to markdown | crawl4ai (`crwl`) -> Firecrawl v2 |
 | `web crawl <url> --map` | List discovered URLs | Firecrawl v2 (paid) |
@@ -23,6 +23,30 @@ cargo install --path .   # installs `web` to ~/.cargo/bin
 | `web browse <cmd> [args]` | Stateful browser control (passthrough) | pw-browse daemon (bundled) -> chrome-devtools |
 
 `--json` on any command for structured output. See `web <cmd> --help`.
+
+### Search providers
+
+`web search` runs on Exa, keyed off the config. `--provider exa|firecrawl` pins
+one provider explicitly, which is also how the two get compared head to head.
+
+Firecrawl is deliberately opt-in: it bills 2 credits per 10 results against a free
+tier of roughly 1000 credits a month and 5 requests a minute, so it is a considered
+choice rather than an automatic one. It answers with Firecrawl's search highlights,
+query-relevant passages lifted from the page body that replace the usual one-line
+description.
+
+```bash
+web search "firecrawl v2 search highlights" --provider firecrawl -n 5
+```
+
+Both providers return snippets that run to thousands of chars per result (Exa's
+highlights reach ~25k chars over 5 results), so every result is capped at 500 chars
+in the shared output path. `--max-snippet <chars>` raises or lowers that budget and
+`--max-snippet 0` disables it for a verbose read.
+
+```bash
+web search "rust clap derive tutorial" -n 3 --max-snippet 0
+```
 
 ### crawl4ai backbone (key-free default)
 
@@ -79,14 +103,13 @@ for the verb list, ref scheme, and the `rydoo-batch` workflow.
 ## Config
 
 `~/.config/web-cli/config.json` (camelCase keys, mode 600). Env vars
-(`EXA_API_KEY`, `FIRECRAWL_API_KEY`, `BRAVE_API_KEY`, `PERPLEXITY_API_KEY`,
-`JINA_API_KEY`) override file values.
+(`EXA_API_KEY`, `FIRECRAWL_API_KEY`, `PERPLEXITY_API_KEY`, `JINA_API_KEY`)
+override file values.
 
 ```json
 {
   "exaApiKey": "...",
   "firecrawlApiKey": "fc-...",
-  "braveApiKey": "...",
   "perplexityApiKey": "pplx-...",
   "jinaApiKey": "jina_...",
   "defaults": {
@@ -103,7 +126,8 @@ for the verb list, ref scheme, and the `rydoo-batch` workflow.
 No keys are required for `fetch`/`crawl` once crawl4ai is installed. Pin
 `fetchBackbone` to `"jina"` or `crawlBackbone` to `"firecrawl"` to skip crawl4ai;
 set `crawl4aiBin` to override the `crwl` path. Exa alone still covers search + fetch
-+ answer; Firecrawl is required only for `--map`, `--depth`, and as crawl fallback.
++ answer; Firecrawl is required only for `--map`, `--depth`, and as crawl fallback,
+plus the opt-in `search --provider firecrawl`.
 
 ## Design notes
 

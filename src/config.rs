@@ -14,8 +14,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firecrawl_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub brave_api_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perplexity_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jina_api_key: Option<String>,
@@ -136,11 +134,6 @@ impl Config {
         if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
             if !v.is_empty() {
                 cfg.firecrawl_api_key = Some(v);
-            }
-        }
-        if let Ok(v) = std::env::var("BRAVE_API_KEY") {
-            if !v.is_empty() {
-                cfg.brave_api_key = Some(v);
             }
         }
         if let Ok(v) = std::env::var("PERPLEXITY_API_KEY") {
