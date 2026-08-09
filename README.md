@@ -80,7 +80,7 @@ The bundled default backend is [`pw-browse/`](pw-browse/), a self-contained pnpm
 package vendored in this repo. It runs its own long-lived persistent-Playwright daemon
 that we detach explicitly and never close on client disconnect. It exists because
 `chrome-devtools-mcp` (the previous backend) kept losing its daemon and Chrome minutes
-after spawn on this Mac (suspected environment-level process reaping); `pw-browse`
+after spawn (suspected environment-level process reaping); `pw-browse`
 sidesteps that by owning the browser process lifetime itself. `pw-browse/` is a
 standalone package, not part of the Rust build. It also ships `rydoo-batch`, a
 deterministic monthly Rydoo runner that shares the Playwright dependency.
@@ -89,10 +89,14 @@ Build and link the backend once (`browseBin` in the config then points at the sh
 
 ```bash
 cd pw-browse
-PNPM_HOME="$HOME/Library/pnpm" pnpm install && pnpm build
-pnpm exec playwright install chromium          # once, if not cached
-PNPM_HOME="$HOME/Library/pnpm" pnpm link --global   # installs `pw-browse` + `rydoo-batch` shims
+pnpm install && pnpm build
+pnpm exec playwright install chromium   # once, if not cached
+pnpm link --global                      # installs `pw-browse` + `rydoo-batch` shims
 ```
+
+Works on macOS and Linux. If `pnpm link --global` complains that no global bin
+directory is set, export `PNPM_HOME` to pnpm's global bin path (`pnpm bin -g`
+prints it) and put it on `$PATH` first.
 
 Runner resolution: `browseBin` config override (binary or `.js` entry point run via
 node; set to the `pw-browse` shim by default) -> `chrome-devtools` on `$PATH` ->
