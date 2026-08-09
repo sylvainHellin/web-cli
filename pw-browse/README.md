@@ -105,7 +105,7 @@ node dist/rydoo-batch.js --spec entries.json --dry-run --entry 1
 node dist/rydoo-batch.js --spec entries.json
 ```
 
-Flags: `--spec <path>` (required), `--dry-run`, `--entry <n>`, `--profile <dir>` (default `~/.cache/pw-browse-rydoo`), `--email <addr>` (SSO email for the silent login bounce, default `sylvain.hellin@hines.com`), `--foreground`.
+Flags: `--spec <path>` (required), `--dry-run`, `--entry <n>`, `--profile <dir>` (default `~/.cache/pw-browse-rydoo`), `--email <addr>` (SSO email for the silent login bounce, default the `RYDOO_EMAIL` env var, e.g. `you@example.com`; the run stops if neither is set), `--foreground`.
 
 ### Unobtrusive launch (window minimized by default)
 
@@ -143,7 +143,7 @@ Per-entry fields:
 ### Login: the silent SSO bounce, and when the Entra session lapses
 
 Rydoo's own session cookie does not survive a browser restart, so every fresh start on the persistent profile lands on the `accounts.rydoo.com` login page even while the Microsoft Entra cookie is still alive.
-The script handles this itself: it fills the email (`--email`, default `sylvain.hellin@hines.com`), clicks Next, and Entra completes SSO silently with zero MFA interaction, landing back on the expenses list in about ten seconds.
+The script handles this itself: it fills the email (`--email <addr>`, or `RYDOO_EMAIL=you@example.com`), clicks Next, and Entra completes SSO silently with zero MFA interaction, landing back on the expenses list in about ten seconds.
 It never types a password and never touches an MFA prompt.
 
 Manual intervention is therefore only needed when the Entra session itself lapses.

@@ -21,7 +21,7 @@
 //   - Precondition: we must reach the authenticated expenses list. A fresh
 //     browser start always lands on the accounts.rydoo.com login page (Rydoo's
 //     own session cookie is not persistent); there we perform a silent SSO
-//     bounce: fill the email (--email, default sylvain.hellin@hines.com), click
+//     bounce: fill the email (--email, or the RYDOO_EMAIL env var), click
 //     Next, and let Entra complete SSO without interaction. If that instead
 //     reaches an interactive Microsoft page (password / MFA / Authenticator) or
 //     stalls, we print a clear handoff message and exit 2. We NEVER type a
@@ -68,7 +68,9 @@ const T = { short: 5000, med: 15000, long: 30000 };
 
 const RYDOO_LIST_URL = "https://app.rydoo.com/expenses/personal";
 const DEFAULT_PROFILE = join(homedir(), ".cache", "pw-browse-rydoo");
-const DEFAULT_EMAIL = "sylvain.hellin@hines.com";
+// SSO email for the silent login bounce. No hardcoded default: it comes from
+// --email or the RYDOO_EMAIL env var, and the run stops if neither is set.
+const ENV_EMAIL = process.env.RYDOO_EMAIL ?? "";
 
 // A run-stopping, precisely-labelled assertion failure.
 class BatchError extends Error {
@@ -785,7 +787,7 @@ function usage(): void {
       "  --dry-run         fill + upload + assert readbacks, then Cancel; nothing saved",
       "  --entry <n>       process only the 1-based nth entry",
       "  --profile <dir>   persistent profile dir (default ~/.cache/pw-browse-rydoo)",
-      `  --email <addr>    SSO email for the silent login bounce (default ${DEFAULT_EMAIL})`,
+      "  --email <addr>    SSO email for the silent login bounce (default: $RYDOO_EMAIL)",
       "  --foreground      keep the browser window visible (default: minimized so it never steals focus)",
       "",
       "Never clicks Submit. Halts loudly on the first failed assertion.",
@@ -807,7 +809,11 @@ async function main(): Promise<void> {
   const dryRun = flags["dry-run"] === true || flags.dryRun === true;
   const onlyEntry = typeof flags.entry === "string" ? parseInt(flags.entry, 10) : null;
   const profileDir = typeof flags.profile === "string" ? resolvePath(flags.profile) : DEFAULT_PROFILE;
-  const email = typeof flags.email === "string" ? flags.email : DEFAULT_EMAIL;
+  const email = typeof flags.email === "string" && flags.email.length > 0 ? flags.email : ENV_EMAIL;
+  if (!email) {
+    process.stderr.write("error: no SSO email; pass --email <addr> or set the RYDOO_EMAIL env var\n");
+    process.exit(1);
+  }
   const foreground = flags.foreground === true;
 
   let entries: Entry[];
