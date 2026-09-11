@@ -23,17 +23,19 @@ struct Answer {
 ///
 /// Provider defaults to config (`exa`), override with --provider.
 /// Falls back exa <-> perplexity if the chosen one has no key.
-pub fn run(query: &str, provider: Option<&str>, json: bool) -> Result<()> {
+pub fn run(query: &str, provider: Option<&str>, lang: Option<&str>, json: bool) -> Result<()> {
     let cfg = Config::load()?;
     let chosen = provider.unwrap_or(&cfg.defaults.answer_provider);
+    // CLI flag overrides the config default; unset means no language hint.
+    let lang = lang.or(cfg.defaults.answer_lang.as_deref());
 
     let ans = match chosen {
         "perplexity" => {
             if let Some(key) = cfg.perplexity_api_key.as_deref() {
-                perplexity_answer(query, &cfg.defaults.perplexity_model, key)?
+                perplexity_answer(query, &cfg.defaults.perplexity_model, lang, key)?
             } else if let Some(key) = cfg.exa_api_key.as_deref() {
                 eprintln!("[web answer] No Perplexity key, falling back to Exa...");
-                exa_answer(query, key)?
+                exa_answer(query, lang, key)?
             } else {
                 bail!("No answer provider configured (need perplexityApiKey or exaApiKey).");
             }
@@ -41,15 +43,26 @@ pub fn run(query: &str, provider: Option<&str>, json: bool) -> Result<()> {
         _ => {
             // default: exa
             if let Some(key) = cfg.exa_api_key.as_deref() {
-                exa_answer(query, key)?
+                exa_answer(query, lang, key)?
             } else if let Some(key) = cfg.perplexity_api_key.as_deref() {
                 eprintln!("[web answer] No Exa key, falling back to Perplexity...");
-                perplexity_answer(query, &cfg.defaults.perplexity_model, key)?
+                perplexity_answer(query, &cfg.defaults.perplexity_model, lang, key)?
             } else {
                 bail!("No answer provider configured (need exaApiKey or perplexityApiKey).");
             }
         }
     };
+
+    // Fail loudly on retrieval failure: a blank answer or no citations means the
+    // provider returned nothing grounded, so do not print a confident-looking
+    // empty success. Exit non-zero instead.
+    if ans.answer.trim().is_empty() || ans.citations.is_empty() {
+        bail!(
+            "no grounded answer returned from {}; retrieval likely failed \
+             (empty answer or no citations)",
+            ans.provider
+        );
+    }
 
     if json {
         println!("{}", serde_json::to_string_pretty(&ans)?);
@@ -73,7 +86,12 @@ pub fn run(query: &str, provider: Option<&str>, json: bool) -> Result<()> {
 }
 
 /// Exa /answer: returns an LLM answer plus citations.
-fn exa_answer(query: &str, api_key: &str) -> Result<Answer> {
+///
+/// Note: Exa /answer takes no system prompt, so premise verification cannot be
+/// injected here (unlike the Perplexity branch). The `lang` hint is plumbed
+/// through but Exa /answer exposes no locale parameter, so it is currently a
+/// no-op on this branch and kept only to keep the call signatures uniform.
+fn exa_answer(query: &str, _lang: Option<&str>, api_key: &str) -> Result<Answer> {
     let client = http::client(120)?;
     let payload = json!({ "query": query, "text": false });
     let resp = client
@@ -107,12 +125,26 @@ fn exa_answer(query: &str, api_key: &str) -> Result<Answer> {
 }
 
 /// Perplexity Sonar: chat completion with citations / search_results.
-fn perplexity_answer(query: &str, model: &str, api_key: &str) -> Result<Answer> {
+fn perplexity_answer(query: &str, model: &str, lang: Option<&str>, api_key: &str) -> Result<Answer> {
     let client = http::client(120)?;
-    let payload = json!({
+    // Premise verification: instruct the model to check assumptions baked into
+    // the question, flag false premises, and admit insufficient sources rather
+    // than guessing.
+    let system = "Verify the premises embedded in the question before answering. \
+        If a premise is false or unsupported, say so explicitly instead of \
+        answering as if it were true. If the sources are insufficient to answer, \
+        say so plainly rather than guessing.";
+    let mut payload = json!({
         "model": model,
-        "messages": [{ "role": "user", "content": query }],
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": query },
+        ],
     });
+    // Language hint via Sonar's web_search_options locale, when set.
+    if let Some(code) = lang {
+        payload["web_search_options"] = json!({ "user_location": { "locale": code } });
+    }
     let resp = client
         .post("https://api.perplexity.ai/v1/sonar")
         .bearer_auth(api_key)

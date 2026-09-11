@@ -69,6 +69,10 @@ enum Commands {
         /// Provider: exa (default) or perplexity
         #[arg(long)]
         provider: Option<String>,
+
+        /// Language hint (BCP-47 code, e.g. en, de) forwarded to the provider
+        #[arg(long)]
+        lang: Option<String>,
     },
 
     /// Control a persistent, stateful browser session (chrome-devtools daemon).
@@ -122,9 +126,11 @@ fn main() {
             max_snippet,
             json,
         ),
-        Commands::Answer { query, provider } => {
-            commands::answer::run(&query, provider.as_deref(), json)
-        }
+        Commands::Answer {
+            query,
+            provider,
+            lang,
+        } => commands::answer::run(&query, provider.as_deref(), lang.as_deref(), json),
         Commands::Browse { args } => commands::browse::run(&args),
         Commands::Crawl {
             url,

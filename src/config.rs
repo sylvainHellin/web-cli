@@ -56,6 +56,10 @@ pub struct Defaults {
     /// Backbone for `web crawl`: "crawl4ai" (default, key-free) or "firecrawl".
     #[serde(default = "default_crawl_backbone")]
     pub crawl_backbone: String,
+    /// Default language hint (BCP-47 code, e.g. "en", "de") for `web answer`,
+    /// forwarded to providers where supported. Unset means no hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_lang: Option<String>,
 }
 
 impl Default for Defaults {
@@ -67,6 +71,7 @@ impl Default for Defaults {
             save_threshold: default_save_threshold(),
             fetch_backbone: default_fetch_backbone(),
             crawl_backbone: default_crawl_backbone(),
+            answer_lang: None,
         }
     }
 }
