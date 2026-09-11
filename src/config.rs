@@ -14,21 +14,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firecrawl_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brave_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perplexity_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jina_api_key: Option<String>,
-    /// Override path to the crawl4ai `crwl` binary. If unset, resolution falls
-    /// back to ~/.local/bin/crwl then $PATH.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub crawl4ai_bin: Option<String>,
-    /// Override entry point for the chrome-devtools CLI used by `web browse`
-    /// (a binary, or a .js script run through node). If unset, resolution falls
-    /// back to `chrome-devtools` on $PATH, then `pnpm dlx` of browse_package.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub browse_bin: Option<String>,
-    /// npm package spec for the `pnpm dlx` fallback of `web browse`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub browse_package: Option<String>,
 
     #[serde(default)]
     pub defaults: Defaults,
@@ -50,10 +40,10 @@ pub struct Defaults {
     /// instead of printed to stdout.
     #[serde(default = "default_save_threshold")]
     pub save_threshold: usize,
-    /// Backbone for `web fetch`: "crawl4ai" (default, key-free) or "jina".
+    /// Backbone for `web fetch`: "jina" (default).
     #[serde(default = "default_fetch_backbone")]
     pub fetch_backbone: String,
-    /// Backbone for `web crawl`: "crawl4ai" (default, key-free) or "firecrawl".
+    /// Backbone for `web crawl`: "firecrawl" (default).
     #[serde(default = "default_crawl_backbone")]
     pub crawl_backbone: String,
     /// Default language hint (BCP-47 code, e.g. "en", "de") for `web answer`,
@@ -89,20 +79,13 @@ fn default_save_threshold() -> usize {
     30_000
 }
 fn default_fetch_backbone() -> String {
-    "crawl4ai".to_string()
+    "jina".to_string()
 }
 fn default_crawl_backbone() -> String {
-    "crawl4ai".to_string()
+    "firecrawl".to_string()
 }
 
 impl Config {
-    /// Pinned chrome-devtools-mcp spec for the `pnpm dlx` fallback.
-    pub fn browse_package(&self) -> String {
-        self.browse_package
-            .clone()
-            .unwrap_or_else(|| "chrome-devtools-mcp@1.6.0".to_string())
-    }
-
     /// Path to the config file. Honours $XDG_CONFIG_HOME, else ~/.config
     /// (not the macOS "Application Support" dir, to match the rest of this
     /// user's tooling).
@@ -139,6 +122,11 @@ impl Config {
         if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
             if !v.is_empty() {
                 cfg.firecrawl_api_key = Some(v);
+            }
+        }
+        if let Ok(v) = std::env::var("BRAVE_API_KEY") {
+            if !v.is_empty() {
+                cfg.brave_api_key = Some(v);
             }
         }
         if let Ok(v) = std::env::var("PERPLEXITY_API_KEY") {

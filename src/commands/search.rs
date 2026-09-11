@@ -16,7 +16,8 @@ struct SearchResult {
 
 /// Search the web for a ranked list of links.
 ///
-/// Default provider: Exa. Firecrawl is opt-in only (`--provider firecrawl`):
+/// Default provider: Brave, with Exa as the fallback when no Brave key is
+/// configured or Brave fails. Firecrawl is opt-in only (`--provider firecrawl`):
 /// it bills 2 credits per 10 results, so it stays out of the default path.
 pub fn run(
     query: &str,
@@ -50,18 +51,131 @@ pub fn run(
                 .context("Exa search failed")?;
             return emit(query, "exa", &results, max_snippet, json);
         }
-        Some(other) => bail!("Unknown search provider '{other}' (expected exa or firecrawl)"),
+        Some("brave") => {
+            let key = cfg
+                .brave_api_key
+                .as_deref()
+                .context("Brave not configured. Add braveApiKey to the config.")?;
+            let results = brave_search(query, count, site, recency, key)
+                .context("Brave search failed")?;
+            return emit(query, "brave", &results, max_snippet, json);
+        }
+        Some(other) => {
+            bail!("Unknown search provider '{other}' (expected brave, exa or firecrawl)")
+        }
         None => {}
     }
 
-    // Default: Exa.
+    // Default: Brave, then Exa.
+    let mut brave_error: Option<String> = None;
+    if let Some(key) = cfg.brave_api_key.as_deref() {
+        match brave_search(query, count, site, recency, key) {
+            Ok(results) if !results.is_empty() => {
+                return emit(query, "brave", &results, max_snippet, json);
+            }
+            Ok(_) => eprintln!("[web search] Brave returned no results, trying Exa..."),
+            Err(e) => {
+                eprintln!("[web search] Brave failed ({e}), trying Exa...");
+                brave_error = Some(e.to_string());
+            }
+        }
+    }
+
     if let Some(key) = cfg.exa_api_key.as_deref() {
         let results = exa_search(query, count, site, recency, key)
             .context("Exa search failed")?;
         return emit(query, "exa", &results, max_snippet, json);
     }
 
-    bail!("No search provider configured. Add exaApiKey to the config.");
+    match brave_error {
+        Some(e) => bail!("Brave search failed ({e}) and no exaApiKey is configured as fallback."),
+        None => bail!("No search provider configured. Add braveApiKey (or exaApiKey) to the config."),
+    }
+}
+
+/// Brave /web/search: GET, the default provider. Billed at 5 USD per 1000
+/// requests on the prepaid Search plan, 50 requests per second, with 5 USD of
+/// free credits a month. A card is required; the standalone free tier was
+/// retired in February 2026.
+fn brave_search(
+    query: &str,
+    count: usize,
+    site: Option<&str>,
+    recency: Option<&str>,
+    api_key: &str,
+) -> Result<Vec<SearchResult>> {
+    let client = http::client(30)?;
+    // Brave has no domain parameter, so the `site:` operator scopes the query.
+    let q = match site {
+        Some(s) => format!("site:{s} {query}"),
+        None => query.to_string(),
+    };
+    // The API caps `count` at 20 per request.
+    let count = count.clamp(1, 20);
+    let mut params: Vec<(&str, String)> = vec![("q", q), ("count", count.to_string())];
+    if let Some(r) = recency {
+        let freshness = match r {
+            "day" => "pd",
+            "week" => "pw",
+            "month" => "pm",
+            "year" => "py",
+            other => other, // allow raw freshness codes and date ranges
+        };
+        params.push(("freshness", freshness.to_string()));
+    }
+
+    let resp = client
+        .get("https://api.search.brave.com/res/v1/web/search")
+        .header("Accept", "application/json")
+        .header("X-Subscription-Token", api_key)
+        .query(&params)
+        .send()
+        .context("Brave request failed")?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().context("Failed to parse Brave response")?;
+    if !status.is_success() {
+        bail!("Brave returned status {status}: {body}");
+    }
+
+    // Response: { web: { results: [ { title, url, description, age, page_age } ] } }
+    let arr = body["web"]["results"].as_array().cloned().unwrap_or_default();
+    let mut results = Vec::new();
+    for r in &arr {
+        let age = r["age"]
+            .as_str()
+            .or_else(|| r["page_age"].as_str())
+            .map(|s| s.to_string());
+        results.push(SearchResult {
+            title: strip_html(r["title"].as_str().unwrap_or("")),
+            url: r["url"].as_str().unwrap_or("").to_string(),
+            // Brave marks query terms with <strong> in the description.
+            snippet: strip_html(r["description"].as_str().unwrap_or("")),
+            age,
+        });
+    }
+    Ok(results)
+}
+
+/// Drop HTML tags and decode the handful of entities Brave emits, so snippets
+/// read as plain text.
+fn strip_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
 }
 
 /// Render results, applying the shared snippet cap first so every provider

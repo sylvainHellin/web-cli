@@ -1,6 +1,5 @@
 mod commands;
 mod config;
-mod crawl4ai;
 mod http;
 mod output;
 
@@ -24,7 +23,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Fetch a URL and return clean, LLM-ready markdown
-    /// (crawl4ai -> Jina Reader -> Exa contents -> raw fetch)
+    /// (Jina Reader -> Exa contents -> raw fetch)
     Fetch {
         /// URL to fetch
         url: String,
@@ -34,7 +33,7 @@ enum Commands {
         raw: bool,
     },
 
-    /// Search the web and return a ranked list of links (Exa)
+    /// Search the web and return a ranked list of links (Brave -> Exa)
     Search {
         /// Search query
         query: String,
@@ -51,7 +50,7 @@ enum Commands {
         #[arg(long)]
         recency: Option<String>,
 
-        /// Force one provider: exa or firecrawl (default: exa).
+        /// Force one provider: brave, exa or firecrawl (default: brave -> exa).
         /// firecrawl is opt-in only (paid per result).
         #[arg(long)]
         provider: Option<String>,
@@ -75,17 +74,8 @@ enum Commands {
         lang: Option<String>,
     },
 
-    /// Control a persistent, stateful browser session (chrome-devtools daemon).
-    /// Args are passed through verbatim: `web browse start`, `web browse --help`
-    #[command(trailing_var_arg = true, disable_help_flag = true)]
-    Browse {
-        /// chrome-devtools command and its args/flags, forwarded verbatim
-        #[arg(allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-
-    /// Crawl a site to markdown (crawl4ai -> Firecrawl).
-    /// --map (list URLs) and --depth are Firecrawl-only.
+    /// Crawl a site to markdown (Firecrawl v2).
+    /// --map lists discovered URLs, --depth limits crawl depth.
     Crawl {
         /// Root URL to crawl
         url: String,
@@ -131,7 +121,6 @@ fn main() {
             provider,
             lang,
         } => commands::answer::run(&query, provider.as_deref(), lang.as_deref(), json),
-        Commands::Browse { args } => commands::browse::run(&args),
         Commands::Crawl {
             url,
             map,

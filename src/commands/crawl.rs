@@ -4,42 +4,27 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
-use crate::crawl4ai;
 use crate::http;
 use crate::output;
 
-/// Crawl a site.
-///   --map  : fast, returns the list of discovered URLs (Firecrawl /map, paid)
-///   --depth: depth-limited crawl (Firecrawl only, paid)
-///   default: crawl pages to markdown via crawl4ai (key-free) -> Firecrawl fallback
+/// Crawl a site, on Firecrawl v2 for every mode.
+///   --map  : fast, returns the list of discovered URLs (Firecrawl /map)
+///   --depth: depth-limited crawl
+///   default: crawl pages to markdown
 pub fn run(url: &str, map: bool, limit: usize, depth: Option<usize>, json: bool) -> Result<()> {
     let cfg = Config::load()?;
 
-    // crawl4ai backbone: key-free page crawl. Not used for --map (no cheap
-    // URL-discovery mode) or --depth (crwl hardcodes max_depth=3).
-    let depth_forces_firecrawl = depth.is_some();
-    if !map
-        && cfg.defaults.crawl_backbone == "crawl4ai"
-        && !depth_forces_firecrawl
-    {
-        if let Some(bin) = crawl4ai::resolve_bin(&cfg) {
-            match crawl4ai::crawl(&bin, url, limit) {
-                Ok(pages) => {
-                    return emit_pages(url, &pages, json, cfg.defaults.save_threshold);
-                }
-                Err(e) => {
-                    eprintln!("[web crawl] crawl4ai failed ({e}), trying Firecrawl...")
-                }
-            }
-        }
-    } else if !map && depth_forces_firecrawl && cfg.defaults.crawl_backbone == "crawl4ai" {
-        eprintln!("[web crawl] --depth not configurable via crawl4ai; using Firecrawl (needs firecrawlApiKey).");
+    if cfg.defaults.crawl_backbone != "firecrawl" {
+        eprintln!(
+            "[web crawl] crawlBackbone '{}' is not available; Firecrawl v2 is the only crawl backbone.",
+            cfg.defaults.crawl_backbone
+        );
     }
 
-    let key = cfg
-        .firecrawl_api_key
-        .as_deref()
-        .context("Firecrawl not configured. Add firecrawlApiKey to the config.")?;
+    let key = cfg.firecrawl_api_key.as_deref().context(
+        "Firecrawl not configured. Add firecrawlApiKey to ~/.config/web-cli/config.json \
+         or set FIRECRAWL_API_KEY.",
+    )?;
 
     if map {
         map_urls(url, limit, key, json)
@@ -48,8 +33,7 @@ pub fn run(url: &str, map: bool, limit: usize, depth: Option<usize>, json: bool)
     }
 }
 
-/// Render a list of normalized `{markdown, metadata:{title, sourceURL}}` pages,
-/// shared by the crawl4ai and Firecrawl paths.
+/// Render a list of normalized `{markdown, metadata:{title, sourceURL}}` pages.
 fn emit_pages(
     url: &str,
     pages: &[serde_json::Value],
