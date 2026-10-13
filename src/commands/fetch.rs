@@ -116,17 +116,29 @@ fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) ->
 }
 
 /// Jina Reader: GET https://r.jina.ai/<url>, returns markdown by default.
-/// With a key the rate limit rises from 20 to 500 requests a minute.
+/// With a key the rate limit rises from 20 to 500 requests a minute. A key the
+/// server refuses (401/402/403) gets one keyless retry, with a warning.
 fn jina_fetch(url: &str, api_key: Option<&str>) -> Result<String> {
     let client = http::client(60)?;
     let endpoint = format!("https://r.jina.ai/{url}");
-    let mut req = client.get(&endpoint).header("X-Return-Format", "markdown");
-    if let Some(key) = api_key {
-        req = req.header("Authorization", format!("Bearer {key}"));
+    let send = |key: Option<&str>| -> Result<(reqwest::StatusCode, String)> {
+        let mut req = client.get(&endpoint).header("X-Return-Format", "markdown");
+        if let Some(key) = key {
+            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+        let resp = req.send().context("Jina request failed")?;
+        let status = resp.status();
+        let body = resp.text().context("Failed to read Jina response")?;
+        Ok((status, body))
+    };
+
+    let (mut status, mut body) = send(api_key)?;
+    if api_key.is_some() && content::jina_key_rejected(status.as_u16()) {
+        eprintln!(
+            "[web fetch] jinaApiKey rejected ({status}); retried keyless (20 requests/minute)."
+        );
+        (status, body) = send(None)?;
     }
-    let resp = req.send().context("Jina request failed")?;
-    let status = resp.status();
-    let body = resp.text().context("Failed to read Jina response")?;
     if !status.is_success() {
         bail!("Jina returned status {status}");
     }

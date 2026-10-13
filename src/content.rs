@@ -23,6 +23,12 @@ pub fn read_capped(r: impl Read, cap: u64) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// Whether a keyed Jina response means the key itself was refused
+/// (401 invalid, 402 out of credit, 403 forbidden), so a keyless retry may work.
+pub fn jina_key_rejected(status: u16) -> bool {
+    matches!(status, 401..=403)
+}
+
 /// A fetched response body, after classification.
 #[derive(Debug)]
 pub enum Body {
@@ -326,6 +332,16 @@ mod tests {
     fn read_capped_rejects_cap_plus_one() {
         let err = read_capped(std::io::Cursor::new(vec![7u8; 65]), 64).unwrap_err();
         assert!(err.to_string().contains("100 MB cap"), "{err}");
+    }
+
+    #[test]
+    fn jina_key_rejected_statuses() {
+        for s in [401, 402, 403] {
+            assert!(jina_key_rejected(s), "{s}");
+        }
+        for s in [200, 429, 500] {
+            assert!(!jina_key_rejected(s), "{s}");
+        }
     }
 
     #[test]
