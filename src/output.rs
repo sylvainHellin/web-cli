@@ -40,6 +40,10 @@ fn spill_path(slug: &str, ext: &str) -> Result<PathBuf> {
     Ok(spill_name(&dir, slug, ext))
 }
 
+/// Longest sanitised slug kept in a spill filename, in bytes, so long URLs
+/// (pre-signed links, big queries) stay under the 255-byte filename limit.
+const MAX_SLUG_BYTES: usize = 100;
+
 fn spill_name(dir: &Path, slug: &str, ext: &str) -> PathBuf {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -50,6 +54,12 @@ fn spill_name(dir: &Path, slug: &str, ext: &str) -> PathBuf {
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect();
     let safe = safe.trim_matches('-');
+    // `is_alphanumeric` keeps non-ASCII letters, so cut on a char boundary.
+    let mut end = safe.len().min(MAX_SLUG_BYTES);
+    while !safe.is_char_boundary(end) {
+        end -= 1;
+    }
+    let safe = safe[..end].trim_end_matches('-');
     let safe = if safe.is_empty() { "page" } else { safe };
     dir.join(format!("{safe}-{ts}.{ext}"))
 }
@@ -68,6 +78,25 @@ mod tests {
         let name = file_name(&spill_name(dir, "example.com/a b?c=1", "pdf"));
         assert!(name.starts_with("example-com-a-b-c-1-"), "{name}");
         assert!(name.ends_with(".pdf"), "{name}");
+    }
+
+    #[test]
+    fn spill_name_bounds_long_slugs() {
+        let dir = Path::new("/tmp/x");
+        let prefix = "https://bucket.s3.amazonaws.com/f.pdf?";
+        let url = format!("{prefix}{}", "X".repeat(400 - prefix.len()));
+        let name = file_name(&spill_name(dir, &url, "pdf"));
+        assert!(name.len() < 255, "{} bytes: {name}", name.len());
+        assert!(
+            name.starts_with("https---bucket-s3-amazonaws-com-f-pdf-XXX"),
+            "{name}"
+        );
+        assert!(name.ends_with(".pdf"), "{name}");
+
+        let wide = "é".repeat(400);
+        let name = file_name(&spill_name(dir, &wide, "md"));
+        assert!(name.len() < 255, "{} bytes", name.len());
+        assert!(name.ends_with(".md"), "{name}");
     }
 
     #[test]
