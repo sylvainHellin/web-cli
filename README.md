@@ -32,11 +32,38 @@ static pages that neither reader handles. A `jinaApiKey` raises Jina's limit fro
 one the command still works and says on stderr that it is on the keyless path. Exa
 `/contents` bills about 1 USD per 1000 pages.
 
+When Jina refuses a configured key with 401, 402 or 403 (invalid, out of credit,
+forbidden), the command prints one warning on stderr and retries once on the keyless
+path.
+A failed retry falls through to Exa as before.
+
 A raw GET that answers with a non-2xx status fails the command and prints the
 status. An error page returned as if it were content is the failure mode this
 chain exists to avoid.
 
 `--raw` skips the readers and returns the response body verbatim.
+The raw GET, whether forced by `--raw` or reached as the last resort, detects binary
+bodies (PDF, Office files, images) from their leading bytes and the `Content-Type`
+header.
+A binary body is saved untouched to a typed file under `$TMPDIR/web-cli/` and never
+printed:
+
+```text
+[Binary content not printed; convert it with `doc parse <path>`.]
+Saved: /tmp/web-cli/example-com-report-pdf-1791906497.pdf
+Content-Type: application/pdf
+Bytes: 3455156
+```
+
+With `--json` the same case returns metadata and no `content` key:
+
+```json
+{"url": "...", "provider": "raw", "binary": true, "path": "...", "content_type": "application/pdf", "bytes": 3455156}
+```
+
+`doc parse <path>` turns the saved file into markdown.
+The raw GET reads at most 100 MB and fails above that; download larger files with
+`curl`.
 `fetchBackbone` picks the head of the chain, `"jina"` (default) or `"exa"`.
 
 ### Search providers
