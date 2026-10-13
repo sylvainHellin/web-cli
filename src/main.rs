@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod content;
 mod http;
 mod output;
 
@@ -28,7 +29,8 @@ enum Commands {
         /// URL to fetch
         url: String,
 
-        /// Return raw fetched body without provider cleaning
+        /// Return the raw body without provider cleaning; binary bodies (PDF, Office,
+        /// images) are saved to a file and the path printed
         #[arg(long)]
         raw: bool,
     },

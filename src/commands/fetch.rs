@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::json;
 
 use crate::config::Config;
+use crate::content::{self, Body};
 use crate::http;
 use crate::output;
 
@@ -51,7 +52,7 @@ pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
 
         match attempt {
             Ok(md) if !md.trim().is_empty() => {
-                return emit(url, &md, provider, json, cfg.defaults.save_threshold);
+                return emit(url, &Body::Text(md), provider, json, cfg.defaults.save_threshold);
             }
             Ok(_) => eprintln!("[web fetch] {provider} returned empty content, falling through..."),
             Err(e) => eprintln!("[web fetch] {provider} failed ({e}), falling through..."),
@@ -63,21 +64,54 @@ pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
     emit(url, &body, "raw", json, cfg.defaults.save_threshold)
 }
 
-fn emit(url: &str, content: &str, provider: &str, json: bool, threshold: usize) -> Result<()> {
-    if json {
-        let out = json!({
-            "url": url,
-            "provider": provider,
-            "chars": content.chars().count(),
-            "content": content,
-        });
-        println!("{}", serde_json::to_string_pretty(&out)?);
-        Ok(())
-    } else {
-        let slug = url
-            .trim_start_matches("https://")
-            .trim_start_matches("http://");
-        output::emit_or_save(content, slug, threshold)
+fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) -> Result<()> {
+    let slug = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    match body {
+        Body::Text(content) => {
+            if json {
+                let out = json!({
+                    "url": url,
+                    "provider": provider,
+                    "chars": content.chars().count(),
+                    "content": content,
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
+                Ok(())
+            } else {
+                output::emit_or_save(content, slug, threshold)
+            }
+        }
+        Body::Binary {
+            bytes,
+            content_type,
+            ext,
+        } => {
+            let path = output::save_bytes(bytes, slug, ext)?;
+            if json {
+                let out = json!({
+                    "url": url,
+                    "provider": provider,
+                    "binary": true,
+                    "path": path.display().to_string(),
+                    "content_type": content_type,
+                    "bytes": bytes.len(),
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                println!(
+                    "[Binary content not printed; convert it with `doc parse <path>`.]\n\
+                     Saved: {}\n\
+                     Content-Type: {}\n\
+                     Bytes: {}",
+                    path.display(),
+                    content_type.as_deref().unwrap_or("unknown"),
+                    bytes.len()
+                );
+            }
+            Ok(())
+        }
     }
 }
 
@@ -133,10 +167,11 @@ fn exa_contents(url: &str, api_key: &str) -> Result<String> {
     }
 }
 
-/// Raw HTTP GET, returns the response body verbatim.
+/// Raw HTTP GET, returns the response body classified as text or binary.
+/// Text is decoded per its charset; binary bytes are kept verbatim.
 /// Non-2xx is an error, never content: an error page rendered as the answer is
 /// the silent degradation this chain exists to avoid.
-fn raw_fetch(url: &str) -> Result<String> {
+fn raw_fetch(url: &str) -> Result<Body> {
     let client = http::client(30)?;
     let resp = client
         .get(url)
@@ -148,5 +183,11 @@ fn raw_fetch(url: &str) -> Result<String> {
     if !status.is_success() {
         bail!("Raw fetch returned status {status} for {final_url}");
     }
-    resp.text().context("Failed to read response body")
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let bytes = resp.bytes().context("Failed to read response body")?.to_vec();
+    Ok(content::classify(content_type.as_deref(), bytes))
 }
