@@ -172,7 +172,8 @@ fn exa_contents(url: &str, api_key: &str) -> Result<String> {
 /// Non-2xx is an error, never content: an error page rendered as the answer is
 /// the silent degradation this chain exists to avoid.
 fn raw_fetch(url: &str) -> Result<Body> {
-    let client = http::client(30)?;
+    // 120 s leaves room for a body near the cap on a modest connection.
+    let client = http::client(120)?;
     let resp = client
         .get(url)
         .header("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
@@ -188,6 +189,9 @@ fn raw_fetch(url: &str) -> Result<Body> {
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let bytes = resp.bytes().context("Failed to read response body")?.to_vec();
+    if resp.content_length().is_some_and(|n| n > content::MAX_BODY_BYTES) {
+        bail!(content::CAP_MESSAGE);
+    }
+    let bytes = content::read_capped(resp, content::MAX_BODY_BYTES)?;
     Ok(content::classify(content_type.as_deref(), bytes))
 }

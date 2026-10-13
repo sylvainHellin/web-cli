@@ -2,6 +2,27 @@
 //! its leading bytes, so binary payloads (PDF, Office, images) are saved
 //! verbatim instead of being decoded into lossy text.
 
+use anyhow::{bail, Context, Result};
+use std::io::Read;
+
+/// Largest response body the CLI reads into memory.
+pub const MAX_BODY_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Message for a body over the cap, shared by the header and stream checks.
+pub const CAP_MESSAGE: &str = "Response body exceeds the 100 MB cap; download it with curl instead";
+
+/// Read a whole body, failing once it grows past `cap` bytes.
+pub fn read_capped(r: impl Read, cap: u64) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    r.take(cap + 1)
+        .read_to_end(&mut buf)
+        .context("Failed to read response body")?;
+    if buf.len() as u64 > cap {
+        bail!(CAP_MESSAGE);
+    }
+    Ok(buf)
+}
+
 /// A fetched response body, after classification.
 #[derive(Debug)]
 pub enum Body {
@@ -292,6 +313,19 @@ mod tests {
         let body = b"<p>Gr\xFC\xDFe</p>".to_vec();
         let text = text_of(classify(Some("text/html; charset=iso-8859-1"), body));
         assert_eq!(text, "<p>Grüße</p>");
+    }
+
+    #[test]
+    fn read_capped_allows_exactly_cap() {
+        let data = vec![7u8; 64];
+        let out = read_capped(std::io::Cursor::new(data.clone()), 64).unwrap();
+        assert_eq!(out, data);
+    }
+
+    #[test]
+    fn read_capped_rejects_cap_plus_one() {
+        let err = read_capped(std::io::Cursor::new(vec![7u8; 65]), 64).unwrap_err();
+        assert!(err.to_string().contains("100 MB cap"), "{err}");
     }
 
     #[test]
