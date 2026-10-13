@@ -4,6 +4,7 @@
 /.pi
 /.nvim
 /.claude
+/.agents
 
 # Local scratch and secrets
 *.local
