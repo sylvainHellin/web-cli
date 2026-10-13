@@ -164,6 +164,14 @@ pub fn classify(content_type: Option<&str>, bytes: Vec<u8>) -> Body {
     if is_binary_media(&media) {
         return binary(bytes);
     }
+    // A recognised charset parameter declares the body as text, whatever the
+    // media type (e.g. application/x-javascript; charset=windows-1252).
+    if charset
+        .as_deref()
+        .is_some_and(|c| encoding_rs::Encoding::for_label(c.as_bytes()).is_some())
+    {
+        return Body::Text(decode(&bytes, charset.as_deref()));
+    }
     // Header missing, octet-stream or unknown: text only if it is clean UTF-8
     // with no NUL near the start. Never decode lossily here.
     let head = &bytes[..bytes.len().min(8 * 1024)];
@@ -319,6 +327,30 @@ mod tests {
         let body = b"<p>Gr\xFC\xDFe</p>".to_vec();
         let text = text_of(classify(Some("text/html; charset=iso-8859-1"), body));
         assert_eq!(text, "<p>Grüße</p>");
+    }
+
+    #[test]
+    fn declared_charset_on_unlisted_media_is_decoded() {
+        let body = b"var s = 'caf\xE9';".to_vec();
+        let text = text_of(classify(
+            Some("application/x-javascript; charset=windows-1252"),
+            body,
+        ));
+        assert_eq!(text, "var s = 'café';");
+        assert_eq!(
+            ext_of(classify(
+                Some("application/octet-stream; charset=bogus"),
+                PDF.to_vec()
+            )),
+            "pdf"
+        );
+        assert_eq!(
+            ext_of(classify(
+                Some("application/pdf; charset=utf-8"),
+                PDF.to_vec()
+            )),
+            "pdf"
+        );
     }
 
     #[test]
