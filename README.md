@@ -37,6 +37,12 @@ forbidden), the command prints one warning on stderr and retries once on the key
 path.
 A failed retry falls through to Exa as before.
 
+Jina answers 200 even when the target page is a bot wall or an error, and flags it
+in its header block (`Warning: Target URL returned error 403`, or a CAPTCHA
+warning). The command treats that as a Jina failure and moves on to Exa and the raw
+GET, which fail in turn on the same wall, so a blocked page exits non-zero instead
+of printing the block page.
+
 A raw GET that answers with a non-2xx status fails the command and prints the
 status. An error page returned as if it were content is the failure mode this
 chain exists to avoid.

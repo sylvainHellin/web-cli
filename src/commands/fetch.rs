@@ -117,7 +117,9 @@ fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) ->
 
 /// Jina Reader: GET https://r.jina.ai/<url>, returns markdown by default.
 /// With a key the rate limit rises from 20 to 500 requests a minute. A key the
-/// server refuses (401/402/403) gets one keyless retry, with a warning.
+/// server refuses (401/402/403) gets one keyless retry, with a warning. A
+/// target page Jina flags as an upstream error or CAPTCHA wall is an error, so
+/// the chain moves on instead of returning the block page as content.
 fn jina_fetch(url: &str, api_key: Option<&str>) -> Result<String> {
     let client = http::client(60)?;
     let endpoint = format!("https://r.jina.ai/{url}");
@@ -141,6 +143,9 @@ fn jina_fetch(url: &str, api_key: Option<&str>) -> Result<String> {
     }
     if !status.is_success() {
         bail!("Jina returned status {status}");
+    }
+    if let Some(problem) = content::jina_upstream_problem(&body) {
+        bail!("Jina reached a block or error page: {problem}");
     }
     Ok(body)
 }

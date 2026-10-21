@@ -29,6 +29,24 @@ pub fn jina_key_rejected(status: u16) -> bool {
     matches!(status, 401..=403)
 }
 
+/// A problem Jina reports with the target page in its header block (the lines
+/// before `Markdown Content:`): an upstream error status or a CAPTCHA wall.
+/// Jina answers 200 in both cases and renders the block page as content, so
+/// without this check a bot wall or a 404 would pass as the page itself.
+/// Other warnings (e.g. a cached snapshot) are not problems.
+pub fn jina_upstream_problem(markdown: &str) -> Option<String> {
+    let header = match markdown.find("\nMarkdown Content:") {
+        Some(i) => &markdown[..i],
+        None => &markdown[..markdown.floor_char_boundary(2048)],
+    };
+    header.lines().find_map(|line| {
+        let warning = line.trim().strip_prefix("Warning:")?.trim();
+        let lower = warning.to_ascii_lowercase();
+        (lower.starts_with("target url returned error") || lower.contains("captcha"))
+            .then(|| warning.to_string())
+    })
+}
+
 /// A fetched response body, after classification.
 #[derive(Debug)]
 pub enum Body {
@@ -374,6 +392,34 @@ mod tests {
         for s in [200, 429, 500] {
             assert!(!jina_key_rejected(s), "{s}");
         }
+    }
+
+    #[test]
+    fn jina_upstream_error_is_a_problem() {
+        let md = "Title: Ich bin kein Roboter\n\nURL Source: https://x.de/\n\n\
+                  Warning: Target URL returned error 401: Unauthorized\n\n\
+                  Markdown Content:\n# Ich bin kein Roboter";
+        assert_eq!(
+            jina_upstream_problem(md).as_deref(),
+            Some("Target URL returned error 401: Unauthorized")
+        );
+    }
+
+    #[test]
+    fn jina_captcha_warning_is_a_problem() {
+        let md = "Title: g2.com\n\nWarning: This page maybe requiring CAPTCHA, please make \
+                  sure you are authorized to access this page.\n\nMarkdown Content:\n";
+        assert!(jina_upstream_problem(md).unwrap().contains("CAPTCHA"));
+    }
+
+    #[test]
+    fn jina_clean_page_and_body_warnings_pass() {
+        let clean = "Title: Hacker News\n\nURL Source: https://news.ycombinator.com\n\n\
+                     Markdown Content:\nWarning: Target URL returned error 500 is a post title";
+        assert_eq!(jina_upstream_problem(clean), None);
+        let cached = "Title: X\n\nWarning: This is a cached snapshot of the original page\n\n\
+                      Markdown Content:\nbody";
+        assert_eq!(jina_upstream_problem(cached), None);
     }
 
     #[test]
