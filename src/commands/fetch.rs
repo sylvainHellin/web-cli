@@ -117,29 +117,53 @@ fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) ->
 
 /// Jina Reader: GET https://r.jina.ai/<url>, returns markdown by default.
 /// With a key the rate limit rises from 20 to 500 requests a minute. A key the
-/// server refuses (401/402/403) gets one keyless retry, with a warning. A
+/// server refuses (401/402/403) gets one keyless retry, with a warning. A 429
+/// on the keyless path waits and retries up to three times (3, 6, 12 s or the
+/// server's Retry-After) before the chain moves on. A
 /// target page Jina flags as an upstream error or CAPTCHA wall is an error, so
 /// the chain moves on instead of returning the block page as content.
 fn jina_fetch(url: &str, api_key: Option<&str>) -> Result<String> {
     let client = http::client(60)?;
     let endpoint = format!("https://r.jina.ai/{url}");
-    let send = |key: Option<&str>| -> Result<(reqwest::StatusCode, String)> {
+    let send = |key: Option<&str>| -> Result<(reqwest::StatusCode, Option<String>, String)> {
         let mut req = client.get(&endpoint).header("X-Return-Format", "markdown");
         if let Some(key) = key {
             req = req.header("Authorization", format!("Bearer {key}"));
         }
         let resp = req.send().context("Jina request failed")?;
         let status = resp.status();
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let body = resp.text().context("Failed to read Jina response")?;
-        Ok((status, body))
+        Ok((status, retry_after, body))
     };
 
-    let (mut status, mut body) = send(api_key)?;
-    if api_key.is_some() && content::jina_key_rejected(status.as_u16()) {
+    let (mut status, mut retry_after, mut body) = send(api_key)?;
+    let mut keyless = api_key.is_none();
+    if !keyless && content::jina_key_rejected(status.as_u16()) {
         eprintln!(
             "[web fetch] jinaApiKey rejected ({status}); retried keyless (20 requests/minute)."
         );
-        (status, body) = send(None)?;
+        (status, retry_after, body) = send(None)?;
+        keyless = true;
+    }
+    // The keyless limit is 20 requests a minute: wait out a burst here rather
+    // than burn an Exa call or hand the rate limit back to the caller.
+    let mut attempt = 1;
+    while keyless && status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let Some(delay) = content::jina_retry_delay(attempt, retry_after.as_deref()) else {
+            break;
+        };
+        eprintln!(
+            "[web fetch] Jina keyless rate limit hit (20 requests/minute); waiting {} s, retry {attempt}.",
+            delay.as_secs()
+        );
+        std::thread::sleep(delay);
+        (status, retry_after, body) = send(None)?;
+        attempt += 1;
     }
     if !status.is_success() {
         bail!("Jina returned status {status}");

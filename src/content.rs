@@ -29,6 +29,22 @@ pub fn jina_key_rejected(status: u16) -> bool {
     matches!(status, 401..=403)
 }
 
+/// How long to wait before retry number `attempt` (1-based) after Jina's
+/// keyless path answered 429, or `None` once the retries are spent.
+/// A `Retry-After` in seconds wins, capped at 30 s; otherwise 3, 6, 12 s.
+/// The keyless limit is 20 requests a minute, so a short wait clears a burst.
+pub fn jina_retry_delay(attempt: u32, retry_after: Option<&str>) -> Option<std::time::Duration> {
+    const MAX_RETRIES: u32 = 3;
+    if attempt == 0 || attempt > MAX_RETRIES {
+        return None;
+    }
+    let secs = retry_after
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|s| s.clamp(1, 30))
+        .unwrap_or(3 << (attempt - 1));
+    Some(std::time::Duration::from_secs(secs))
+}
+
 /// A problem Jina reports with the target page in its header block (the lines
 /// before `Markdown Content:`): an upstream error status or a CAPTCHA wall.
 /// Jina answers 200 in both cases and renders the block page as content, so
@@ -392,6 +408,16 @@ mod tests {
         for s in [200, 429, 500] {
             assert!(!jina_key_rejected(s), "{s}");
         }
+    }
+
+    #[test]
+    fn jina_retry_backoff_and_retry_after() {
+        let s = |a, h| jina_retry_delay(a, h).map(|d| d.as_secs());
+        assert_eq!((s(1, None), s(2, None), s(3, None), s(4, None)), (Some(3), Some(6), Some(12), None));
+        assert_eq!(s(1, Some("8")), Some(8));
+        assert_eq!(s(1, Some("600")), Some(30));
+        assert_eq!(s(2, Some("Wed, 21 Oct 2026 07:28:00 GMT")), Some(6));
+        assert_eq!(s(0, None), None);
     }
 
     #[test]

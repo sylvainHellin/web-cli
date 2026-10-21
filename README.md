@@ -37,6 +37,10 @@ forbidden), the command prints one warning on stderr and retries once on the key
 path.
 A failed retry falls through to Exa as before.
 
+On the keyless path a 429 waits and retries up to three times, for the server's
+`Retry-After` (capped at 30 s) or 3, 6 and 12 s, before falling through to Exa.
+A burst of parallel fetches therefore slows down instead of spending Exa calls.
+
 Jina answers 200 even when the target page is a bot wall or an error, and flags it
 in its header block (`Warning: Target URL returned error 403`, or a CAPTCHA
 warning). The command treats that as a Jina failure and moves on to Exa and the raw
