@@ -122,11 +122,16 @@ fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) ->
 /// server's Retry-After) before the chain moves on. A
 /// target page Jina flags as an upstream error or CAPTCHA wall is an error, so
 /// the chain moves on instead of returning the block page as content.
+/// `X-No-Cache` makes Jina read the live page: its cache served a TYPO3 page's
+/// old text a day after the edit.
 fn jina_fetch(url: &str, api_key: Option<&str>) -> Result<String> {
     let client = http::client(60)?;
     let endpoint = format!("https://r.jina.ai/{url}");
     let send = |key: Option<&str>| -> Result<(reqwest::StatusCode, Option<String>, String)> {
-        let mut req = client.get(&endpoint).header("X-Return-Format", "markdown");
+        let mut req = client
+            .get(&endpoint)
+            .header("X-Return-Format", "markdown")
+            .header("X-No-Cache", "true");
         if let Some(key) = key {
             req = req.header("Authorization", format!("Bearer {key}"));
         }
