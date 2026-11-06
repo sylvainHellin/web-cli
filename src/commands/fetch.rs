@@ -4,6 +4,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::content::{self, Body};
 use crate::http;
+use crate::links;
 use crate::output;
 
 /// Fetch a URL and return clean markdown.
@@ -12,11 +13,13 @@ use crate::output;
 /// `fetchBackbone` picks the head of the chain ("jina" or "exa"); the rest of
 /// the order is fixed. A raw GET that answers non-2xx fails the command: a 404
 /// reported as page content is worse than no answer at all.
+/// Exa's text carries no links, so an Exa answer gets the page's anchors
+/// appended from a raw GET.
 pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
     let cfg = Config::load()?;
 
     if raw {
-        let body = raw_fetch(url)?;
+        let (body, _) = raw_fetch(url)?;
         return emit(url, &body, "raw", json, cfg.defaults.save_threshold);
     }
 
@@ -52,6 +55,7 @@ pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
 
         match attempt {
             Ok(md) if !md.trim().is_empty() => {
+                let md = if provider == "exa" { with_page_links(url, md) } else { md };
                 return emit(url, &Body::Text(md), provider, json, cfg.defaults.save_threshold);
             }
             Ok(_) => eprintln!("[web fetch] {provider} returned empty content, falling through..."),
@@ -60,8 +64,24 @@ pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
     }
 
     // Last resort: a raw GET, for static pages the readers choke on.
-    let body = raw_fetch(url).context("All fetch providers failed")?;
+    let (body, _) = raw_fetch(url).context("All fetch providers failed")?;
     emit(url, &body, "raw", json, cfg.defaults.save_threshold)
+}
+
+/// Append the page's anchors to Exa's text, which has none: on a page whose
+/// answer is a download (a form, a spreadsheet), the link is the content.
+/// A raw GET that fails or returns no HTML anchors leaves the text as it is.
+fn with_page_links(url: &str, md: String) -> String {
+    match raw_fetch(url) {
+        Ok((Body::Text(html), final_url)) => {
+            md + &links::links_section(&links::html_links(&html, &final_url))
+        }
+        Ok(_) => md,
+        Err(e) => {
+            eprintln!("[web fetch] Exa text carries no links, and the raw GET for them failed ({e}).");
+            md
+        }
+    }
 }
 
 fn emit(url: &str, body: &Body, provider: &str, json: bool, threshold: usize) -> Result<()> {
@@ -213,11 +233,12 @@ fn exa_contents(url: &str, api_key: &str) -> Result<String> {
     }
 }
 
-/// Raw HTTP GET, returns the response body classified as text or binary.
+/// Raw HTTP GET, returns the response body classified as text or binary, and
+/// the final URL after redirects (the base for relative links).
 /// Text is decoded per its charset; binary bytes are kept verbatim.
 /// Non-2xx is an error, never content: an error page rendered as the answer is
 /// the silent degradation this chain exists to avoid.
-fn raw_fetch(url: &str) -> Result<Body> {
+fn raw_fetch(url: &str) -> Result<(Body, String)> {
     // 120 s leaves room for a body near the cap on a modest connection.
     let client = http::client(120)?;
     let resp = client
@@ -239,5 +260,5 @@ fn raw_fetch(url: &str) -> Result<Body> {
         bail!(content::CAP_MESSAGE);
     }
     let bytes = content::read_capped(resp, content::MAX_BODY_BYTES)?;
-    Ok(content::classify(content_type.as_deref(), bytes))
+    Ok((content::classify(content_type.as_deref(), bytes), final_url))
 }

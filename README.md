@@ -32,6 +32,12 @@ static pages that neither reader handles. A `jinaApiKey` raises Jina's limit fro
 one the command still works and says on stderr that it is on the keyless path. Exa
 `/contents` bills about 1 USD per 1000 pages.
 
+Exa returns the page text without its links, so an Exa answer ends with a
+`## Links on the page` section built from a raw GET of the same page (absolute URLs,
+one per target, at most 300). On a page whose answer is a download (a form, a
+spreadsheet) the link would otherwise be lost. A failed raw GET leaves the Exa text
+as it is and says so on stderr.
+
 When Jina refuses a configured key with 401, 402 or 403 (invalid, out of credit,
 forbidden), the command prints one warning on stderr and retries once on the keyless
 path.

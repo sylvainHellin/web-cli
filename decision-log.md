@@ -11,3 +11,9 @@ Why: Jina's cache served the old text of an edited TYPO3 page a day after the ch
 Rejected: a `--fresh` flag, which leaves the stale default in place and relies on the caller knowing the page changed.
 Source: chat with Sylvain, 2026-10-28.
 Status: accepted
+
+## 2026-11-06 - An Exa fetch appends the page's links from a raw GET
+Why: Exa `/contents` returns plain text, so when Jina failed on the BMF Kaufpreisaufteilung page (503) the fetch lost the .xlsx download link and only the `--raw` HTML showed it; Exa's own `extras.links` returned one wrong link for that page.
+Rejected: Exa `extras.links` (incomplete); a `--links` flag (leaves the default silently lossy); a local HTML-to-markdown crate for the raw path (a new dependency for a narrower gap).
+Source: chat with Sylvain, 2026-11-06.
+Status: accepted

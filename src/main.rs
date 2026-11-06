@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod content;
 mod http;
+mod links;
 mod output;
 
 use clap::{Parser, Subcommand};
