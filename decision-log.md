@@ -17,3 +17,9 @@ Why: Exa `/contents` returns plain text, so when Jina failed on the BMF Kaufprei
 Rejected: Exa `extras.links` (incomplete); a `--links` flag (leaves the default silently lossy); a local HTML-to-markdown crate for the raw path (a new dependency for a narrower gap).
 Source: chat with Sylvain, 2026-11-06.
 Status: accepted
+
+## 2026-11-11 - A hash-routed URL gets a stderr warning, and the fetch still runs
+Why: `web fetch` of the OGC iDays agenda (`#/agenda?day=1`, Zoho Backstage) silently returned the home page, since the route after `#` never reaches the server; the agenda only came out through the agent browser.
+Rejected: failing the command (the base page is sometimes what the caller wants); stripping the fragment silently (the current behaviour).
+Source: chat with Sylvain, 2026-11-11.
+Status: accepted

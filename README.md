@@ -57,6 +57,12 @@ A raw GET that answers with a non-2xx status fails the command and prints the
 status. An error page returned as if it were content is the failure mode this
 chain exists to avoid.
 
+A single-page app on hash routing (`https://site/app#/agenda`) keeps its route
+after `#`, which the browser never sends to the server, so every provider returns
+the app's base page.
+The command still prints it, after a warning on stderr that names the cause; the
+route itself needs the agent browser.
+
 `--raw` skips the readers and returns the response body verbatim.
 The raw GET, whether forced by `--raw` or reached as the last resort, detects binary
 bodies (PDF, Office files, images) from their leading bytes and the `Content-Type`

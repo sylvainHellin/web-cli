@@ -63,6 +63,15 @@ pub fn jina_upstream_problem(markdown: &str) -> Option<String> {
     })
 }
 
+/// True when the URL carries a client-side route after `#` (`#/agenda`,
+/// `#!/page`), as single-page apps on hash routing do. The fragment never
+/// reaches the server, so any fetch returns the app's base page, not the route.
+/// A plain anchor (`#section-2`) is not a route.
+pub fn hash_route(url: &str) -> bool {
+    url.split_once('#')
+        .is_some_and(|(_, fragment)| fragment.starts_with('/') || fragment.starts_with("!/"))
+}
+
 /// A fetched response body, after classification.
 #[derive(Debug)]
 pub enum Body {
@@ -446,6 +455,15 @@ mod tests {
         let cached = "Title: X\n\nWarning: This is a cached snapshot of the original page\n\n\
                       Markdown Content:\nbody";
         assert_eq!(jina_upstream_problem(cached), None);
+    }
+
+    #[test]
+    fn hash_routes_are_detected_and_anchors_are_not() {
+        assert!(hash_route("https://events.ogc.org/iDays2026#/agenda?day=1&lang=en"));
+        assert!(hash_route("https://example.com/app#!/page"));
+        assert!(!hash_route("https://example.com/doc#section-2"));
+        assert!(!hash_route("https://example.com/doc"));
+        assert!(!hash_route("https://example.com/doc#"));
     }
 
     #[test]

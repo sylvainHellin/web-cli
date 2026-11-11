@@ -15,8 +15,17 @@ use crate::output;
 /// reported as page content is worse than no answer at all.
 /// Exa's text carries no links, so an Exa answer gets the page's anchors
 /// appended from a raw GET.
+/// A URL with a client-side route after `#` gets a warning first: every
+/// provider fetches the app's base page, not the route.
 pub fn run(url: &str, raw: bool, json: bool) -> Result<()> {
     let cfg = Config::load()?;
+
+    if content::hash_route(url) {
+        eprintln!(
+            "[web fetch] The URL routes after '#', which never reaches the server: the content \
+             below is the site's base page, not that route. Read the route in the agent browser."
+        );
+    }
 
     if raw {
         let (body, _) = raw_fetch(url)?;
